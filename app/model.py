@@ -29,6 +29,7 @@ class MLP():
             cnn1 = keras.layers.MaxPool1D(pool_size=4)(cnn1)
             cnn2 = keras.layers.Convolution1D(256, 4, padding='same', strides=1, activation='relu')(embed)
             cnn2 = keras.layers.MaxPool1D(pool_size=4)(cnn2)
+            cnn2 = keras.layers.Dropout(0.2)(cnn2)
             cnn3 = keras.layers.Convolution1D(256, 5, padding='same', strides=1, activation='relu')(embed)
             cnn3 = keras.layers.MaxPool1D(pool_size=4)(cnn3)
             # 合并三个模型的输出向量
