@@ -92,6 +92,12 @@ class ABCNN():
         p=model.predict(x=[text1_c_index,text2_c_index])
         print("‘{}’和‘{}’相似的概率为：{}".format(text1[0],text2[0],p[0][0]),p)
         print("‘{}’和‘{}’".format(text1_c_index,text2_c_index))
+    def text_vector(self,model,text1,text2):#利用模型将文本表示成向量形式
+        text_vec_model=Model(inputs=model.input,outputs=model.get_layer('dense_1').output)
+        text1_c_index,text2_c_index=char_index(text1,text2)
+        p=text_vec_model.predict(x=[text1_c_index,text2_c_index])
+        print("‘{}’和‘{}’".format(text1_c_index,text2_c_index))
+        print("向量{}".format(p.shape),p[0].shape)
 import tensorflow as tf
 import keras.backend.tensorflow_backend as KTF
 config = tf.ConfigProto()  # 进行配置，使用30%的GPU
@@ -118,8 +124,8 @@ def predict_main():
         if len(ts)==1:
             ts=line.split(',')
         text1,text2=ts[0],ts[1]
-        abcnn.process(model,[text1],[text2])
+        # abcnn.process(model,[text1],[text2])
+        abcnn.text_vector(model,[text1],[text2])
 
 if __name__=="__main__":
     predict_main()
-
