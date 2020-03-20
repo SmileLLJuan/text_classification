@@ -22,13 +22,13 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"  #指定运行GPU
 class ABCNN():
     def __init__(self):
         pass
-    def laod_data(self,file='./input/test.csv'):
+    def load_data(self,file='./input/test.csv'):
         text1_list, text2_list, label_list = load_char_data(file, data_size=None)
         # print(np.array(text1_list).shape,np.array(text2_list).shape,np.array(label_list).shape)
         # print(text1_list[0],text2_list[0],label_list[0])
         return text1_list, text2_list, label_list
     '''train,process,persist,load'''
-    def creat_model(self):
+    def create_model(self):
         input_text1=Input(shape=(args.seq_length,),dtype='int32',name="text1")
 
         embedding_matrix = np.random.rand(args.vocab_size, args.char_embedding_size) # 词嵌入（使用预训练的词向量）
@@ -56,8 +56,8 @@ class ABCNN():
         model.compile(optimizer=Adam(lr=1e-3),loss="binary_crossentropy",metrics=['binary_crossentropy','accuracy'])
         return model
     def train(self):
-        text1_list, text2_list, label_list=self.laod_data(file='./input/test.csv')
-        model=self.creat_model()
+        text1_list, text2_list, label_list=self.load_data(file='./input/test.csv')
+        model=self.create_model()
         model.summary()
         early_stopping=EarlyStopping(monitor='val_loss',patience=10,verbose=1)
         model.fit(x=[text1_list,text2_list],y=[label_list],epochs=args.epochs,verbose=1,batch_size=args.batch_size,callbacks=[early_stopping])
@@ -69,7 +69,7 @@ class ABCNN():
         model.save(self.model_saved_dir)
         return self.model_saved_dir
     def load(self,model_saved_dir):
-        model=self.creat_model()
+        model=self.create_model()
         model.load_weights(model_saved_dir)
         for layer in model.layers:
             print("{}层的权重:{}".format(layer.name,np.array(model.get_layer(layer.name).get_weights()).shape),model.get_layer(layer.name))
@@ -112,7 +112,7 @@ def evaluate_main():
     abcnn=ABCNN()
     model_saved_dir = "./output/ABCNN_model_weights.h5"
     model = abcnn.load(model_saved_dir)
-    test_text1, test_text2, test_label = abcnn.laod_data(file="./input/test.csv")
+    test_text1, test_text2, test_label = abcnn.load_data(file="./input/test.csv")
     abcnn.evalute(model, test_text1, test_text2, test_label)
 def predict_main():
     abcnn=ABCNN()
