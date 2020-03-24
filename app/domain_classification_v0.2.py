@@ -266,7 +266,7 @@ class CNN_POS_Model():#模型中添加了pos特征
     def create_model(self,):
         input_text1=keras.Input(shape=(self.hyper_parameters['seq_length'],),dtype='int32',name="input_text1")
         input_text1_pos=keras.Input(shape=(self.hyper_parameters['seq_length'],),dtype='int32',name="input_text1_pos")
-        embedding_matrix = self.dp.create_embedding_matrix()
+        embedding_matrix = self.dp.create_embedding_matrix()#用预训练的词向量创建embedding
         # embedding_matrix = np.random.rand(len(self.vocab)+1, self.vocab_size) # 词嵌入（使用预训练的词向量）
         embedding_matrix_pos = np.random.rand(len(self.dp.pos_dictionary)+1, self.pos_vocab_size) # pos词嵌入
         print(embedding_matrix.shape)
@@ -349,7 +349,7 @@ hyper_parameters={
              "dropout":0.1,
              'lr': 1e-3,  # 学习率,bert取5e-5,其他取1e-3, 对训练会有比较大的影响, 如果准确率一直上不去,可以考虑调这个参数
              "metrics":"accuracy",# 保存更好模型的评价标准
-             "model_saved_dir":"./output/CNN_Model_model_weights.h5",#模型权重保存地址
+             "model_saved_dir":"./output/CNN_POS_Model_model_weights.h5",#模型权重保存地址
              "word_dictionary_dir":"./word_dictionary.json",#词典保存地址
             "vector_file":"D:\py3.6code\QA\code\mydgcnn\data\\temp\sgns.wiki.word",#预训练词向量地址
              "text_vector_dim":256,#代倒数第二层神经元个数
@@ -365,6 +365,14 @@ def train():
     cnn.train(model,train_x, train_x_pos,train_y)
     cnn.evalute(model,test_x,test_x_pos, test_y)
     print("训练耗时：{}".format(time.time()-t0))
+def predict():
+    cnn=CNN_POS_Model(hyper_parameters)
+    model = cnn.create_model()
+    cnn.load(hyper_parameters['model']['model_saved_dir'])
+    text1="你好"
+    while text1!='./stop':
+        text1=input(">>>")
+        cnn.process(model,text1)
 if __name__=="__main__":
-    train()
+    predict()
 
