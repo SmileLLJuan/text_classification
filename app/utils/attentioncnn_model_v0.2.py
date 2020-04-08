@@ -12,50 +12,56 @@ import tensorflow as tf
 import time,os,platform,sys
 import numpy as np
 from data_processor import FeatureRepresentation
-from attention_keras import Attention
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+from attention_keras import Attention,SelfAttention
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import keras
 class Attention_TextCNN_Char_Model():
     '''初始化：词典，预训练词向量矩阵，文本预处理过程'''
     def __init__(self,hyper_parameters):
-        self.fr=FeatureRepresentation(class_num=196)
-        word_dictionary_dir = os.path.abspath(os.path.dirname(os.path.realpath(__file__)) + os.path.sep + ".." + "/data/word_dictionary.json")
-        self.vocab =self.fr.load_word_dictionary(word_dictionary_dir=word_dictionary_dir)
-        self.vocab_size = self.fr.vector_size
+        word_dictionary_dir = os.path.abspath(os.path.dirname(os.path.realpath(__file__)) + os.path.sep + ".." + hyper_parameters['model']['word_dictionary_dir'])
+        print(word_dictionary_dir)
+        self.fr=FeatureRepresentation(class_num=196,word_dictionary_dir=word_dictionary_dir)
+        self.vocab =self.fr.word_dictionary
+        self.embedding_dim = self.fr.vector_size
         self.hyper_parameters=hyper_parameters
-
-        pass
 
     def create_model(self,):
         input_text1 = keras.Input(shape=(self.hyper_parameters['seq_length'],), dtype='int32', name="input_text1")
         if self.hyper_parameters['model']['trainable'] is True:
-            embedding_matrix = np.random.rand(len(self.vocab) + 1, self.vocab_size)  # 词嵌入（使用预训练的词向量）
+            embedding_matrix = np.random.rand(len(self.vocab) + 1, self.embedding_dim)  # 词嵌入（使用预训练的词向量）
         else:
             embedding_matrix = self.fr.create_embedding_matrix()  # 用预训练的词向量创建embedding
-        embedding_layer = keras.layers.Embedding(input_dim=len(self.vocab) + 1, output_dim=self.vocab_size,
+        embedding_layer = keras.layers.Embedding(input_dim=len(self.vocab) + 1, output_dim=self.embedding_dim,
                                                  input_length=self.hyper_parameters['seq_length'],
                                                  weights=[embedding_matrix], trainable=True)
 
-        embedd = embedding_layer(input_text1)
-
-        embedd = Attention(heads=8, size_per_head=64, mask_right=True)([embedd, embedd, embedd])
+        embedd = embedding_layer(input_text1)#output=(?,sequence_length,embedding_dim)=(None, 64, 300)
+        print("embedd",embedd)
+        heads=hyper_parameters['model']['heads']
+        size_per_head=hyper_parameters['model']['size_per_head']
+        embedd = Attention(heads=heads, size_per_head=size_per_head, mask_right=True)([embedd, embedd, embedd])
+        print("embedd",embedd)
+        embedd_reshape=keras.layers.Reshape((self.hyper_parameters['seq_length'],heads*size_per_head,1))(embedd)
+        print("embedd_reshape",embedd_reshape)#(?,sequence_length,embedding_dim,1)=(None, 64, 300, 1)
         # embedd=keras.layers.SpatialDropout1D(0.1)(embedd)
         filter_sizes = [3, 4, 5]
-        num_filters = [256, 128, 64]
+        num_filters = [64, 64, 64]
         conv_pools = []
         for i, filter_size in enumerate(filter_sizes):
-            conv = keras.layers.Conv1D(num_filters[i], filter_size, padding='same', strides=1, activation='relu')(embedd)
-            pool = keras.layers.MaxPool1D(3, 3, padding='same')(conv)
+            conv = keras.layers.Conv2D(num_filters[i],kernel_size=(filter_size,heads*size_per_head), padding='valid', strides=(1,1),kernel_initializer='normal',activation='relu',name="conv_{}".format(i))(embedd_reshape)
+            print("conv",conv)
+            pool = keras.layers.MaxPool2D(pool_size=(self.hyper_parameters['seq_length'] - filter_size + 1, 1), strides=(1,1),padding='valid',name='pool_{}'.format(i))(conv)
+            print("pool",pool)
             conv_pools.append(pool)
         conv3 = keras.layers.concatenate(conv_pools, axis=-1)
-        flat = keras.layers.Flatten(name='Flatten_1')(conv3)
-        dense_1 = keras.layers.Dropout(self.hyper_parameters['model']['dropout'])(flat)
-        dense_1=keras.layers.BatchNormalization()(dense_1)
-        dense_2 = keras.layers.Dense(self.hyper_parameters['model']['text_vector_dim'], activation='relu',name='dense_2')(dense_1)
-        dense_2=keras.layers.BatchNormalization()(dense_2)
-        dense_2 = keras.layers.Dropout(self.hyper_parameters['model']['dropout'])(dense_2)
+        print(conv3)
+        flatten = keras.layers.Flatten()(conv3)
 
-        output = keras.layers.Dense(self.hyper_parameters['class_num'], name='output', activation='softmax')(dense_2)
+        flatten = keras.layers.Dropout(self.hyper_parameters['model']['dropout'])(flatten)
+        dense_1 = keras.layers.Dense(self.hyper_parameters['model']['text_vector_dim'], activation='relu',name='dense_1')(flatten)
+        # dense_1=keras.layers.BatchNormalization()(dense_1)
+        output = keras.layers.Dense(self.hyper_parameters['class_num'], name='output', activation='softmax')(dense_1)
+
         model = keras.Model(inputs=input_text1, outputs=output)
 
         '''调用自定义的facal loss'''
@@ -67,6 +73,7 @@ class Attention_TextCNN_Char_Model():
 
         # model.compile(optimizer=keras.optimizers.Adam(lr=self.hyper_parameters['model']['lr']),loss=focal_loss_fixed,metrics=[focal_loss_fixed,self.hyper_parameters['model']['metrics']])
         model.compile(optimizer=keras.optimizers.Adam(lr=self.hyper_parameters['model']['lr']),loss="categorical_crossentropy",metrics=["categorical_crossentropy", self.hyper_parameters['model']['metrics']])
+        # model.compile(optimizer=keras.optimizers.Adam(lr=self.hyper_parameters['model']['lr']),loss=my_loss,metrics=[my_loss, self.hyper_parameters['model']['metrics']])
         model.summary()
         if (platform.system() == "Windows"):
             from keras.utils import plot_model
@@ -78,12 +85,12 @@ class Attention_TextCNN_Char_Model():
     def train(self, model, train_x, train_y):  # 传入的是处理好的词典id序列
         from keras.callbacks import EarlyStopping
         from keras.callbacks import TensorBoard, ModelCheckpoint
-        early_stopping = EarlyStopping(monitor='loss', patience=10, verbose=1)
+        # early_stopping = EarlyStopping(monitor='loss', patience=10, verbose=1)
         tensorboard=TensorBoard(log_dir=self.hyper_parameters['model']['log_dir'])
         self.best_model_saved_dir = "../data/output/{}_best_model_weights.h5".format(self.__class__.__name__)
         checkpoint = ModelCheckpoint(filepath=self.best_model_saved_dir, monitor='val_acc', mode='auto', save_best_only='True')
-        model.fit(train_x, train_y,epochs=self.hyper_parameters['model']['epochs'], verbose=1,
-                  batch_size=self.hyper_parameters['model']['batch_size'], callbacks=[tensorboard,checkpoint,early_stopping])
+        # model.fit(train_x, train_y,epochs=self.hyper_parameters['model']['epochs'], verbose=1,batch_size=self.hyper_parameters['model']['batch_size'], callbacks=[tensorboard,checkpoint,early_stopping])
+        model.fit(train_x, train_y,epochs=self.hyper_parameters['model']['epochs'], verbose=1,batch_size=self.hyper_parameters['model']['batch_size'], callbacks=[tensorboard,checkpoint])
         self.presist(model)
         pass
 
@@ -93,6 +100,11 @@ class Attention_TextCNN_Char_Model():
         return self.model_saved_dir
 
     def load(self, model_saved_dir="../data/output/{}_best_model_weights.h5".format(sys._getframe().f_code.co_name)):
+        if os.path.exists(self.hyper_parameters['model']['best_model_saved_dir']):
+            model_saved_dir=self.hyper_parameters['model']['best_model_saved_dir']
+        else:
+            model_saved_dir=self.hyper_parameters['model']['last_model_saved_dir']
+        print("加载 model地址:{}".format(model_saved_dir))
         model = self.create_model()
         model.load_weights(model_saved_dir)
         for layer in model.layers:
@@ -122,16 +134,19 @@ class Attention_TextCNN_Char_Model():
 hyper_parameters = {
     "seq_length": 32,  # 文本序列最大长度
     "class_num": 197,  # 类别个数
-    "model": {"epochs": 100,
+    "model": {"epochs": 200,
               "dropout": 0.5,
               'lr': 1e-3,  # 学习率,bert取5e-5,其他取1e-3, 对训练会有比较大的影响, 如果准确率一直上不去,可以考虑调这个参数
               "metrics": "accuracy",  # 保存更好模型的评价标准
-              "model_saved_dir": "../data/output/Attention_TextCNN_Char_Model_best_model_weights.h5",  # 模型权重保存地址
-              "word_dictionary_dir": "../data/word_dictionary.json",  # 词典保存地址
+              "best_model_saved_dir": "../data/output/Attention_TextCNN_Char_Model_best_model_weights.h5",  # 模型权重保存地址
+              "last_model_saved_dir": "../data/output/Attention_TextCNN_Char_Model_model_weights.h5",  # 模型权重保存地址
+              "word_dictionary_dir": "/data/word_dictionary.json",  # 词典保存地址
               "vector_file": "D:\py3.6code\QA\code\mydgcnn\data\\temp\sgns.wiki.word",  # 预训练词向量地址
               "log_dir":"../data/log",#tensorboard保存路径
-              "text_vector_dim": 256,  # 代倒数第二层神经元个数
-              "batch_size": 256,
+              "text_vector_dim": 256,  # 倒数第二层神经元个数
+              "batch_size": 64,
+              'heads':4,
+              'size_per_head':32,
               "trainable": True,
               }
 }
@@ -156,13 +171,14 @@ def split_data():#加载数据、处理数据、分割数据
     train_texts, train_labels = texts[:int(ratio * len(texts))], labels[:int(ratio * len(texts))]
     test_texts, test_labels = texts[int(ratio * len(texts)):], labels[int(ratio * len(texts)):]
     print(len(index), len(train_texts), len(test_texts), int(ratio * len(texts)), len(texts))
-
-    fr = FeatureRepresentation(class_num=class_num)
+    word_dictionary_dir = os.path.abspath(os.path.dirname(os.path.realpath(__file__)) + os.path.sep + ".." + hyper_parameters['model']['word_dictionary_dir'])
+    fr = FeatureRepresentation(class_num=hyper_parameters['class_num'],senquence_len=hyper_parameters['seq_length'],word_dictionary_dir=word_dictionary_dir)
     # dp.process("高速通行费，可以简易征收增值税吗？Can you tell Me雞', '雞', '虎', '牛', '豬', '虎', '兔',chonghong 砖票")
     train_x, train_y = fr.sentence2idx(train_texts,tokenization=fr.dp.char_tokenization), fr.label2onehot(train_labels)
     test_x, test_y = fr.sentence2idx(test_texts,tokenization=fr.dp.char_tokenization),fr.label2onehot(test_labels)
     print(train_x.shape, train_y.shape)
     print(test_x.shape, test_y.shape)
+    print("词典大小:{},未来识别词语{}:{}".format(len(fr.word_dictionary),len(fr.OOV),fr.OOV))
     return train_x, train_y, test_x, test_y
 
 import time
@@ -181,10 +197,7 @@ def predict():
     train_x, train_y, test_x, test_y = split_data()
     print(train_x)
     cnn = Attention_TextCNN_Char_Model(hyper_parameters)
-    model_saved_dir = "../data/output/{}_best_model_weights.h5".format(cnn.__class__.__name__)
-    if os.path.exists(model_saved_dir) is False:
-        model_saved_dir = "../data/output/{}_model_weights.h5".format(cnn.__class__.__name__)
-    model = cnn.load(model_saved_dir)
+    model = cnn.load()
     cnn.evalute(model, test_x, test_y)
     text1 = "你好"
     while text1 != "/stop":
@@ -203,9 +216,8 @@ def similarity_vecs_caculate(text1_vec,text2_vec):
 from sklearn.metrics.pairwise import cosine_similarity
 def similarity_texts():#讲两个文本表示成向量的形式，计算向量之间的相似度
     cnn = Attention_TextCNN_Char_Model(hyper_parameters)
-    # model=cnn.load(hyper_parameters['model']['model_saved_dir'])
     model=cnn.load()
-    text_vector_model = keras.Model(inputs=model.input, outputs=[model.get_layer('lstm_1').get_output_at(0),model.get_layer('lstm_1').get_output_at(1)])
+    text_vector_model = keras.Model(inputs=model.input, outputs=model.get_layer('dense_1').output)
     text_vector_model.summary()
     fr=FeatureRepresentation(class_num=2)
     texts="你好|你好吗"
@@ -214,11 +226,11 @@ def similarity_texts():#讲两个文本表示成向量的形式，计算向量�
         text1,text2=texts.strip().split('|')
         text1_index = np.array(fr.sentence2idx([fr.dp.process(text1)],tokenization=fr.dp.char_tokenization))  # 文本转化成词典id序列表示
         text2_index = np.array(fr.sentence2idx([fr.dp.process(text2)],tokenization=fr.dp.char_tokenization))  # 文本转化成词典id序列表示
-        text1_vec=text_vector_model.predict(x=[text1_index,text1_index])[0]
-        text2_vec=text_vector_model.predict(x=[text2_index,text2_index])[0]
+        text1_vec=text_vector_model.predict(x=text1_index)
+        text2_vec=text_vector_model.predict(x=text2_index)
         print("文本{}词典id序列{},向量{}".format(text1,text1_index,text1_vec.shape))#这里p[0]\p[1]两个向量一样
         score=similarity_vecs_caculate(text1_vec,text2_vec)
         print("'{}'与'{}'之间cos={}".format(text1,text2,score))
 
 if __name__ == "__main__":
-    train()
+    similarity_texts()
